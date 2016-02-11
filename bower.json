@@ -1,0 +1,18 @@
+{
+  "name": "video_channel_delay",
+  "authors": [
+    "Nuno de la serna"
+  ],
+  "license": "MIT",
+  "homepage": "",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "jquery": "~2.2.0"
+  }
+}
