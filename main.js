@@ -44,27 +44,44 @@ var GLApp = {
    },
 
    downloadResources: function(callback) {
+      function downloadImage(name,url) {
+         var deferred = $.Deferred();
+
+         var image = new Image();
+         image.onload = function() {
+            graph.resources[name] = image;
+            deferred.resolve();
+         }
+         image.src = url;
+
+         return deferred.promise();
+      }
       $.when(
          // get shader by ajax request
          $.get( '/videocolor.shader', (function( data ) {
-            graph.resources.shader_source = data;
-         }).bind(this))
+               graph.resources.shader_source = data;
+            }).bind(this)
+         ),
+         downloadImage( 'image_1', '/assets/img1.png' )
       ).done(callback);
    },
 
    initGeometry: function() {
+      /* shader */
       graph.colorShader = new GLApp.Shader(graph.resources.shader_source);
       graph.colorShader.getUniformLocation('vresolution');
 
+      /* line rows */
       var total_size =
          configuration.orientation == 'horizontal' ? GLApp.canvas.height : GLApp.canvas.width;
       var number_of_lines = Math.floor(total_size / configuration.resolution);
-      //var line_size = total_size / number_of_lines;
       var line_size = 2 / number_of_lines;
 
       for (var i = 0; i < number_of_lines; i++)
          graph.lines.push(new Line({id: i, size: line_size }));
 
+      /* textre */
+      graph.texture = new GLApp.Texture({source: graph.resources.image_1});
    },
 
    initRender: function() {
@@ -107,6 +124,7 @@ GLApp.Shader.prototype = {
       var shaders = this.preprocess(source);
       this.create(shaders);
    },
+
    create: function(shaders) {
       gl = GLApp.gl;
 
@@ -127,8 +145,8 @@ GLApp.Shader.prototype = {
       gl.linkProgram( this.program );
 
       this.checkShaderError(this.program, true);
-     
    },
+
    destroy: function() {
       gl = GLApp.gl;
       var shaders = gl.getAttachedShaders(this.program);
@@ -138,6 +156,7 @@ GLApp.Shader.prototype = {
       gl.deleteShader(shaders[1]);
       gl.deleteProgram(this.program);
    },
+
    compile: function(shader, source) {
       gl = GLApp.gl;
 
@@ -160,6 +179,7 @@ GLApp.Shader.prototype = {
       // check if it compiled
       this.checkShaderError(shader);
    },
+
    preprocess: function(source) {
       lines = source.split('\n');
       var shaders = {};
@@ -182,6 +202,7 @@ GLApp.Shader.prototype = {
       }
       return shaders;
    },
+
    checkShaderError: function(object, program ) {
       if (program == null) {
          program = false;
@@ -204,6 +225,7 @@ GLApp.Shader.prototype = {
             throw ('Not shader or program');
       }
    },
+
    getAttribLocation: function(name){
       var attrib_location = this.attrib_locations[name];
       if(attrib_location === undefined){
@@ -211,6 +233,7 @@ GLApp.Shader.prototype = {
       }
       return attrib_location;
    },
+
    getUniformLocation: function(name){
       var uniform_location = this.uniform_locations[name];
       if(uniform_location === undefined){
@@ -218,6 +241,7 @@ GLApp.Shader.prototype = {
       }
       return uniform_location;
    },
+
    uniform: function(name, value){
       var uniform_location = this.getUniformLocation(name);
       if(value.type == 'Mat4'){
@@ -236,6 +260,7 @@ GLApp.Shader.prototype = {
          gl['uniform' + value.length + 'fv'](uniform_location, value);
       }
    },
+
    use: function() {
       GLApp.gl.useProgram(this.program);
    }
@@ -262,6 +287,7 @@ GLApp.VBO.prototype = {
          this.addVBO(i);
       
    },
+
    addVBO(id) {
       var gl = GLApp.gl;
 
@@ -276,6 +302,7 @@ GLApp.VBO.prototype = {
       gl.bindBuffer(gl.ARRAY_BUFFER, null); // unbinding
 
    },
+
    setUpAttribPointer: function(id) {
       var gl = GLApp.gl;
       gl.enableVertexAttribArray(id);
@@ -288,6 +315,7 @@ GLApp.VBO.prototype = {
          0
       );
    },
+
    draw: function() {
       var gl = GLApp.gl;
 
@@ -304,6 +332,36 @@ GLApp.VBO.prototype = {
    }
 
 };
+
+GLApp.Texture = function(options) { this.init(options || {}); };
+
+GLApp.Texture.prototype = {
+   init: function(options) {
+      if (options.source != null)
+         this.createFromSource(options.source)
+   },
+
+   createFromSource: function(source_img) {
+      gl = GLApp.gl;
+
+      texture = gl.createTexture();
+
+      gl.bindTexture( gl.TEXTURE_2D, texture );
+//      gl.pixelStorei( gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source_img );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST );
+
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE );
+
+      // unbind
+      gl.bindTexture(gl.TEXTURE_2D, null);
+
+      return texture;
+   }
+};
+
 var Line = function(options){ this.init(options || {}); };
 
 Line.prototype = {
@@ -312,6 +370,7 @@ Line.prototype = {
       this.size = options.size;
       this.createGeometry();
    },
+
    createGeometry: function() {
       var p = {
          top: 1 - this.size*this.id,
@@ -340,6 +399,7 @@ Line.prototype = {
 
       this.vbo = new GLApp.VBO({ vertex: vertices });
    },
+
    draw: function(){
       this.vbo.draw();
    }
