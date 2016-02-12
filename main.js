@@ -4,11 +4,12 @@
  * See the accompanying LICENSE file for terms.
 */
 var configuration = {
-   fps: 60,
-   resolution: 2,
+   fps: 30,
+   resolution: 30,
    intensity: 1,              // 0 - 1
    channels: 'RGB',           // R | B | G
    orientation: 'horizontal', // horizontal | vertical
+//   orientation: 'vertical', // horizontal | vertical
    direction: 'forward'       // back |forward
 };
 var graph = {
@@ -46,7 +47,6 @@ var GLApp = {
       $.when(
          // get shader by ajax request
          $.get( '/videocolor.shader', (function( data ) {
-            console.log('reicived shader source');
             graph.resources.shader_source = data;
          }).bind(this))
       ).done(callback);
@@ -54,18 +54,59 @@ var GLApp = {
 
    initGeometry: function() {
       graph.colorShader = new GLApp.Shader(graph.resources.shader_source);
+      graph.colorShader.getUniformLocation('vresolution');
+
+      var total_size =
+         configuration.orientation == 'horizontal' ? GLApp.canvas.height : GLApp.canvas.width;
+      var number_of_lines = Math.floor(total_size / configuration.resolution);
+      //var line_size = total_size / number_of_lines;
+      var line_size = 2 / number_of_lines;
+
+      for (var i = 0; i < number_of_lines; i++)
+         graph.lines.push(new Line({id: i, size: line_size }));
+
+   },
+
+   initRender: function() {
+      gl.clearColor(0.0, 0.0, 0.0, 1.0);
+
+      gl.viewport( 0, 0, GLApp.canvas.width, GLApp.canvas.height );
+
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(gl.BACK);
+
+      graph.colorShader.use();
+      graph.colorShader.uniform(
+         'vresolution',
+         [GLApp.canvas.width, GLApp.canvas.height]
+      );
+
+      this.frameCount = 0;
+      // draw loop
+      this.drawLoopId = setInterval((function(){
+         this.frameCount++;
+         this.render();
+      }).bind(this), configuration.fps);
+   },
+
+   render: function() {
+      for (i in graph.lines) {
+         graph.lines[i].draw();
+      }
    }
 
 };
 
-GLApp.Shader = function(source) {
-   this.attrib_locations = {};
-   this.uniform_locations = {};
-   var shaders = this.preprocess(source);
-   this.create(shaders);
+GLApp.Shader = function(source) { this.init(source || {}); };
 
-};
 GLApp.Shader.prototype = {
+   init: function(source) {
+      this.attrib_locations = {};
+      this.uniform_locations = {};
+      var shaders = this.preprocess(source);
+      this.create(shaders);
+   },
    create: function(shaders) {
       gl = GLApp.gl;
 
@@ -100,17 +141,18 @@ GLApp.Shader.prototype = {
    compile: function(shader, source) {
       gl = GLApp.gl;
 
-      var directives =`
-         #ifdef GL_FRAGMENT_PRECISION_HIGH\n
-         precision highp int;\n
-         precision highp float;\n
-         #else\n
-         precision mediump int;\n
-         precision mediump float;\n
-         #endif\n\n`;
+      var directives = [
+         '#ifdef GL_FRAGMENT_PRECISION_HIGH',
+         'precision highp int;',
+         'precision highp float;',
+         '#else',
+         'precision mediump int;',
+         'precision mediump float;',
+         '#endif'
+      ];
 
       // set the shader source cod
-      gl.shaderSource(shader, directives + source);
+      gl.shaderSource(shader, directives.join('\n') + source);
 
       // compile the shader
       gl.compileShader(shader);
@@ -133,7 +175,8 @@ GLApp.Shader.prototype = {
          }
          else{
             if(current){
-               shaders[current] += '#line ' + i + '\n' + line + '\n';
+               //shaders[current] += '#line ' + i + '\n' + line + '\n';
+               shaders[current] += line + '\n';
             }
          }
       }
@@ -174,17 +217,140 @@ GLApp.Shader.prototype = {
          var uniform_location = this.uniform_locations[name] = gl.getUniformLocation(this.program, name);
       }
       return uniform_location;
+   },
+   uniform: function(name, value){
+      var uniform_location = this.getUniformLocation(name);
+      if(value.type == 'Mat4'){
+         gl.uniformMatrix4fv(uniform_location, false, value.data);
+      }
+      else if(value.type == 'Mat3'){
+         gl.uniformMatrix3fv(uniform_location, false, value.data);
+      }
+      else if(value.type == 'Vec3'){
+         gl.uniform3f(uniform_location, value.x, value.y, value.z);
+      }
+      else if(typeof(value) == 'number'){
+         gl.uniform1f(uniform_location, value);
+      }
+      else if(typeof(value) == 'object'){
+         gl['uniform' + value.length + 'fv'](uniform_location, value);
+      }
+   },
+   use: function() {
+      GLApp.gl.useProgram(this.program);
    }
 
 }
 
+GLApp.VBO = function(options){ this.init(options || {}); };
+
+GLApp.VBO.prototype = {
+   init(options) {
+      this.buffers = [];
+
+      this.buffers[0] = {};
+      this.buffers[0].data = options.vertex;
+      this.buffers[0].size = 3;
+
+      if (options.texcoord != undefined) {
+         this.buffers[1] = {};
+         this.buffers[1].data = options.texcoord;
+         this.buffers[1].size = 2;
+      }
+
+      for (i in this.buffers)
+         this.addVBO(i);
+      
+   },
+   addVBO(id) {
+      var gl = GLApp.gl;
+
+      // generate and bind the buffer object
+      this.buffers[id].vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers[id].vbo);
+      gl.bufferData(gl.ARRAY_BUFFER,
+         new Float32Array(this.buffers[id].data),
+         gl.STATIC_DRAW
+      );
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, null); // unbinding
+
+   },
+   setUpAttribPointer: function(id) {
+      var gl = GLApp.gl;
+      gl.enableVertexAttribArray(id);
+      gl.vertexAttribPointer(
+         id,
+         this.buffers[id].size,
+         gl.FLOAT,
+         false,
+         0,
+         0
+      );
+   },
+   draw: function() {
+      var gl = GLApp.gl;
+
+      // bind all the vbo streams
+      for (i in this.buffers) {
+         buffer = this.buffers[i];
+         gl.bindBuffer(gl.ARRAY_BUFFER, buffer.vbo);
+         this.setUpAttribPointer(i);
+      }
+
+      gl.drawArrays(gl.TRIANGLES, 0, this.buffers[0].data.length / this.buffers[0].size);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+   }
+
+};
 var Line = function(options){ this.init(options || {}); };
+
+Line.prototype = {
+   init: function(options) {
+      this.id = options.id;
+      this.size = options.size;
+      this.createGeometry();
+   },
+   createGeometry: function() {
+      var p = {
+         top: 1 - this.size*this.id,
+         rigth: 1,
+         bottom: 1 - this.size*(this.id+1),
+         left: -1
+      };
+      if (configuration.orientation == 'vertical')
+         p = {
+            top: p.left,
+            rigth: p.bottom,
+            bottom: p.rigth,
+            left: p.top
+         };
+
+      var vertices = [
+         p.left,  p.top,    0,
+         p.left,  p.bottom, 0,
+         p.rigth, p.bottom, 0,
+         
+         p.left,  p.top,    0,
+         p.rigth, p.bottom, 0,
+         p.rigth, p.top,    0
+      ];
+
+
+      this.vbo = new GLApp.VBO({ vertex: vertices });
+   },
+   draw: function(){
+      this.vbo.draw();
+   }
+};
 
 $('document').ready(function(){
    /* download resources */
    GLApp.downloadResources( function() {
       GLApp.init();
       GLApp.initGeometry();
+      GLApp.initRender();
    });
 
 });
