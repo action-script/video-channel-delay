@@ -5,15 +5,14 @@
 */
 var configuration = {
    fps: 30,
-   resolution: 30,
-   intensity: 1,              // 0 - 1
+   resolution: 20,
    channels: 'R',             // R | B | G | RGB
-   orientation: 'horizontal', // horizontal | vertical
-//   orientation: 'vertical', // horizontal | vertical
-   direction: 'forward'       // back |forward
+//   orientation: 'horizontal', // horizontal | vertical
+   orientation: 'vertical', // horizontal | vertical
 };
 var graph = {
    resources: {},
+   textures: [],
    lines: []
 };
 // GL helper static functions
@@ -44,7 +43,7 @@ var GLApp = {
    },
 
    downloadResources: function(callback) {
-      function downloadImage(name,url) {
+      function loadImage(name,url) {
          var deferred = $.Deferred();
 
          var image = new Image();
@@ -56,14 +55,33 @@ var GLApp = {
 
          return deferred.promise();
       }
+      function loadVideo(name, url) {
+         var deferred = $.Deferred();
+
+         var video = document.createElement('video');
+         video.onloadeddata = function() {
+            graph.resources[name] = video;
+            video.play();
+            deferred.resolve();
+         }
+         
+         video.preload = 'auto';
+         video.loop = true;
+         video.src = url;
+
+         video.style.display = 'none';
+         document.body.appendChild(video);
+
+         return deferred.promise();
+      }
       $.when(
          // get shader by ajax request
          $.get( '/videocolor.shader', (function( data ) {
                graph.resources.shader_source = data;
             }).bind(this)
          ),
-         downloadImage( 'image_1', '/assets/img1.png' ),
-         downloadImage( 'image_2', '/assets/img2.png' )
+         // get html5 video
+         loadVideo( 'video', '/assets/video3_min.mp4' )
       ).done(callback);
    },
 
@@ -77,12 +95,12 @@ var GLApp = {
       var number_of_lines = Math.floor(total_size / configuration.resolution);
       var line_size = 2 / number_of_lines;
 
-      for (var i = 0; i < number_of_lines; i++)
-         graph.lines.push(new Line({id: i, size: line_size }));
+      for (var i = 0; i < number_of_lines; i++) {
+         graph.lines.push( new Line({id: i, size: line_size }) );
+         graph.textures.push( new GLApp.Texture({source: graph.resources.video}) );
+      }
 
-      /* textre */
-      graph.texture1 = new GLApp.Texture({source: graph.resources.image_1});
-      graph.texture2 = new GLApp.Texture({source: graph.resources.image_2});
+      graph.number_of_lines = number_of_lines;
    },
 
    initRender: function() {
@@ -102,36 +120,42 @@ var GLApp = {
       );
       var value = 0;
       value = configuration.channels.indexOf('R') > -1 ? 1 : 0;
-      graph.colorShader.uniform(
-         'channels.R', value
-      );
+      graph.colorShader.uniform('channels.R', value);
       value = configuration.channels.indexOf('G') > -1 ? 1 : 0;
-      graph.colorShader.uniform(
-         'channels.G', value
-      );
+      graph.colorShader.uniform('channels.G', value);
       value = configuration.channels.indexOf('B') > -1 ? 1 : 0;
-      graph.colorShader.uniform(
-         'channels.B', value
-      );
+      graph.colorShader.uniform('channels.B', value);
 
       this.frameCount = 0;
       // draw loop
       this.drawLoopId = setInterval((function(){
          this.frameCount++;
          this.render();
-      }).bind(this), configuration.fps);
+      }).bind(this), 1000 / configuration.fps);
    },
 
    render: function() {
-      graph.texture1.use(0);
-//      graph.colorShader.uniform('simage_base', 0);
+      // image base
+      graph.textures[graph.number_of_lines-1].use(0);
+      graph.colorShader.uniform('simage_base', 0);
 
-      graph.texture2.use(1);
+      for (var i in graph.lines) {
+         this.drawLine( parseInt(i) );
+      }
+
+      // get new video frame texture
+      var removed_texture = graph.textures.shift();
+      // update instead of destroy
+      removed_texture.update( graph.resources.video );
+      graph.textures.push( removed_texture );
+   },
+
+   drawLine: function(id) {
+      // image over
+      graph.textures[graph.number_of_lines-1-id].use(1);
       graph.colorShader.uniform('simage_over', 1);
 
-      for (i in graph.lines) {
-         graph.lines[i].draw();
-      }
+      graph.lines[id].draw();
    }
 
 };
@@ -373,8 +397,8 @@ GLApp.Texture.prototype = {
       gl.bindTexture( gl.TEXTURE_2D, this.texture );
       gl.pixelStorei( gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source_img );
-      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST );
-      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR );
 
       gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE );
       gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE );
@@ -383,12 +407,26 @@ GLApp.Texture.prototype = {
       gl.bindTexture(gl.TEXTURE_2D, null);
    },
 
+   update: function(source_img) {
+      gl = GLApp.gl;
+
+      gl.bindTexture(gl.TEXTURE_2D, this.texture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source_img);
+      // unbind
+      gl.bindTexture(gl.TEXTURE_2D, null);
+},
+
    use: function(id) {
       if (id == null) id = 0;
       gl = GLApp.gl;
 
       gl.activeTexture(gl['TEXTURE'+id]);
       gl.bindTexture(gl.TEXTURE_2D, this.texture);
+   },
+
+   destroy: function() {
+      GLApp.gl.deleteTexture(this.texture);
    }
 };
 
