@@ -7,7 +7,7 @@ var configuration = {
    fps: 30,
    resolution: 30,
    intensity: 1,              // 0 - 1
-   channels: 'RGB',           // R | B | G
+   channels: 'R',             // R | B | G | RGB
    orientation: 'horizontal', // horizontal | vertical
 //   orientation: 'vertical', // horizontal | vertical
    direction: 'forward'       // back |forward
@@ -62,14 +62,14 @@ var GLApp = {
                graph.resources.shader_source = data;
             }).bind(this)
          ),
-         downloadImage( 'image_1', '/assets/img1.png' )
+         downloadImage( 'image_1', '/assets/img1.png' ),
+         downloadImage( 'image_2', '/assets/img2.png' )
       ).done(callback);
    },
 
    initGeometry: function() {
       /* shader */
       graph.colorShader = new GLApp.Shader(graph.resources.shader_source);
-      graph.colorShader.getUniformLocation('vresolution');
 
       /* line rows */
       var total_size =
@@ -81,7 +81,8 @@ var GLApp = {
          graph.lines.push(new Line({id: i, size: line_size }));
 
       /* textre */
-      graph.texture = new GLApp.Texture({source: graph.resources.image_1});
+      graph.texture1 = new GLApp.Texture({source: graph.resources.image_1});
+      graph.texture2 = new GLApp.Texture({source: graph.resources.image_2});
    },
 
    initRender: function() {
@@ -93,10 +94,24 @@ var GLApp = {
       gl.enable(gl.CULL_FACE);
       gl.cullFace(gl.BACK);
 
+      // pass config to shaders
       graph.colorShader.use();
       graph.colorShader.uniform(
          'vresolution',
          [GLApp.canvas.width, GLApp.canvas.height]
+      );
+      var value = 0;
+      value = configuration.channels.indexOf('R') > -1 ? 1 : 0;
+      graph.colorShader.uniform(
+         'channels.R', value
+      );
+      value = configuration.channels.indexOf('G') > -1 ? 1 : 0;
+      graph.colorShader.uniform(
+         'channels.G', value
+      );
+      value = configuration.channels.indexOf('B') > -1 ? 1 : 0;
+      graph.colorShader.uniform(
+         'channels.B', value
       );
 
       this.frameCount = 0;
@@ -108,6 +123,12 @@ var GLApp = {
    },
 
    render: function() {
+      graph.texture1.use(0);
+//      graph.colorShader.uniform('simage_base', 0);
+
+      graph.texture2.use(1);
+      graph.colorShader.uniform('simage_over', 1);
+
       for (i in graph.lines) {
          graph.lines[i].draw();
       }
@@ -219,14 +240,14 @@ GLApp.Shader.prototype = {
          if ( gl.isShader(object) ) {
             success = gl.getShaderParameter(object, gl.COMPILE_STATUS);
             if (!success)
-               throw ('could not compile shader:' + gl.getShaderInfoLog(object) );
+               throw ('could not compile shader\n' + gl.getShaderInfoLog(object) );
          }
          else
             throw ('Not shader or program');
       }
    },
 
-   getAttribLocation: function(name){
+   getAttribLocation: function(name) {
       var attrib_location = this.attrib_locations[name];
       if(attrib_location === undefined){
          var attrib_location = this.attrib_locations[name] = gl.getAttribLocation(this.program, name);
@@ -234,29 +255,32 @@ GLApp.Shader.prototype = {
       return attrib_location;
    },
 
-   getUniformLocation: function(name){
+   getUniformLocation: function(name) {
       var uniform_location = this.uniform_locations[name];
-      if(uniform_location === undefined){
+      if (uniform_location === undefined) {
          var uniform_location = this.uniform_locations[name] = gl.getUniformLocation(this.program, name);
       }
       return uniform_location;
    },
 
-   uniform: function(name, value){
+   uniform: function(name, value) {
       var uniform_location = this.getUniformLocation(name);
-      if(value.type == 'Mat4'){
+      if (value.type == 'Mat4') {
          gl.uniformMatrix4fv(uniform_location, false, value.data);
       }
-      else if(value.type == 'Mat3'){
+      else if (value.type == 'Mat3') {
          gl.uniformMatrix3fv(uniform_location, false, value.data);
       }
-      else if(value.type == 'Vec3'){
+      else if (value.type == 'Vec3') {
          gl.uniform3f(uniform_location, value.x, value.y, value.z);
       }
-      else if(typeof(value) == 'number'){
-         gl.uniform1f(uniform_location, value);
+      else if (typeof(value) == 'number') {
+         if (isInt(value))
+            gl.uniform1i(uniform_location, value);
+         else if (isFloat(value))
+            gl.uniform1f(uniform_location, value);
       }
-      else if(typeof(value) == 'object'){
+      else if (typeof(value) == 'object') {
          gl['uniform' + value.length + 'fv'](uniform_location, value);
       }
    },
@@ -344,10 +368,10 @@ GLApp.Texture.prototype = {
    createFromSource: function(source_img) {
       gl = GLApp.gl;
 
-      texture = gl.createTexture();
+      this.texture = gl.createTexture();
 
-      gl.bindTexture( gl.TEXTURE_2D, texture );
-//      gl.pixelStorei( gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.bindTexture( gl.TEXTURE_2D, this.texture );
+      gl.pixelStorei( gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source_img );
       gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST );
       gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST );
@@ -357,8 +381,14 @@ GLApp.Texture.prototype = {
 
       // unbind
       gl.bindTexture(gl.TEXTURE_2D, null);
+   },
 
-      return texture;
+   use: function(id) {
+      if (id == null) id = 0;
+      gl = GLApp.gl;
+
+      gl.activeTexture(gl['TEXTURE'+id]);
+      gl.bindTexture(gl.TEXTURE_2D, this.texture);
    }
 };
 
@@ -414,3 +444,13 @@ $('document').ready(function(){
    });
 
 });
+
+/* helper */
+
+function isInt(n) {
+    return Number(n) === n && n % 1 === 0;
+}
+
+function isFloat(n) {
+    return Number(n) === n && n % 1 !== 0;
+}
