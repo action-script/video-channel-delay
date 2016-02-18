@@ -5,16 +5,19 @@
 */
 var configuration = {
    fps: 30,
-   resolution: 20,
-   channels: 'R',             // R | B | G | RGB
-//   orientation: 'horizontal', // horizontal | vertical
-   orientation: 'vertical', // horizontal | vertical
+   video_speed: 1.0,
+   resolution: 2,
+   channels: 'RGB',             // R | B | G | RGB
+   orientation: 'horizontal', // horizontal | vertical
+   video_name: 'video1_min.mp4'
 };
 var graph = {
    resources: {},
    textures: [],
    lines: []
 };
+// stats
+var stats = new Stats();
 // GL helper static functions
 var GLApp = {
    init: function(options) {
@@ -61,7 +64,6 @@ var GLApp = {
          var video = document.createElement('video');
          video.onloadeddata = function() {
             graph.resources[name] = video;
-            video.play();
             deferred.resolve();
          }
          
@@ -81,7 +83,7 @@ var GLApp = {
             }).bind(this)
          ),
          // get html5 video
-         loadVideo( 'video', '/assets/video3_min.mp4' )
+         loadVideo( 'video', '/assets/'+configuration.video_name )
       ).done(callback);
    },
 
@@ -101,6 +103,13 @@ var GLApp = {
       }
 
       graph.number_of_lines = number_of_lines;
+
+      // display stats
+      stats.domElement.style.position = 'absolute';
+      stats.domElement.style.left = '0px';
+      stats.domElement.style.top = '0px';
+
+      document.body.appendChild( stats.domElement );
    },
 
    initRender: function() {
@@ -126,6 +135,10 @@ var GLApp = {
       value = configuration.channels.indexOf('B') > -1 ? 1 : 0;
       graph.colorShader.uniform('channels.B', value);
 
+      // start play movie
+      graph.resources.video.play();
+      graph.resources.video.playbackRate = configuration.video_speed;
+
       this.frameCount = 0;
       // draw loop
       this.drawLoopId = setInterval((function(){
@@ -135,6 +148,8 @@ var GLApp = {
    },
 
    render: function() {
+      stats.begin();
+
       // image base
       graph.textures[graph.number_of_lines-1].use(0);
       graph.colorShader.uniform('simage_base', 0);
@@ -148,6 +163,8 @@ var GLApp = {
       // update instead of destroy
       removed_texture.update( graph.resources.video );
       graph.textures.push( removed_texture );
+
+      stats.end();
    },
 
    drawLine: function(id) {
